@@ -94,7 +94,6 @@ class PotterCord:
             await ctx.send(db_get_data_player(self.db, db_player_table, db_player_table_player_id_field_name
                                               , str(author.id), ["*"]))
 
-
         @self.bot.group(name='build',
                         brief='The command to build buildings in your suitcase',
                         help='The command to build buildings in your suitcase\n'
