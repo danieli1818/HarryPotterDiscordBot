@@ -1,6 +1,7 @@
 # bot.py
 import datetime
 import os
+import random as rnd
 
 import discord
 from discord import Game
@@ -10,7 +11,8 @@ from dotenv import load_dotenv
 
 from discord.ext import commands
 
-from db import connect_database, db_add_data, db_update_data_player, db_get_data_player
+from db import connect_database, db_add_data, db_update_data_player, db_get_data_by_id
+from magical_beasts_manager import get_random_magical_beast
 
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
@@ -29,6 +31,11 @@ db_magical_beasts_table_player_id_field_name = os.getenv('DB_TABLE_MAGICAL_BEAST
 
 db_buildings_table = os.getenv('DB_TABLE_BUILDINGS')
 db_buildings_table_player_id_field_name = os.getenv('DB_TABLE_BUILDING_ID_FIELD_NAME')
+
+db_guilds_data_table = os.getenv('DB_TABLE_GUILDS_DATA')
+db_guilds_data_table_guild_id_field_name = os.getenv('DB_TABLE_GUILDS_DATA_ID_FIELD_NAME')
+
+habitats_kinds = os.getenv('HABITATS_KINDS').split(", ")
 
 
 class PotterCord:
@@ -91,8 +98,8 @@ class PotterCord:
         @commands.has_role("Wizard")
         async def get_stats(ctx):
             author = ctx.author
-            await ctx.send(db_get_data_player(self.db, db_player_table, db_player_table_player_id_field_name
-                                              , str(author.id), ["*"]))
+            await ctx.send(db_get_data_by_id(self.db, db_player_table, db_player_table_player_id_field_name
+                                             , str(author.id), ["*"]))
 
         @self.bot.group(name='build',
                         brief='The command to build buildings in your suitcase',
@@ -108,13 +115,30 @@ class PotterCord:
             #     self.build_habitat(author, args)
 
         @build.command(name='habitat')
+        @commands.has_role("Wizard")
         async def build_habitat(ctx, kind: str):
-            pass
+            author = ctx.author
+            if kind not in habitats_kinds:
+                await ctx.send("{0.mention} habitat kind does not exist!".format(author))
+            price = self.get_habitat_building_price(author, kind)
+            # player_data = self.get_player_data(author)
+            # money = player_data["money"]
+            if not self.change_money(author, -price):
+                await ctx.send("{0.mention} you don't have enough money to build that habitat!".format(author))
+                return
+            self.add_habitat_to_player(author, kind)
+            await ctx.send("{0.mention} habitat {1} has been successfully built!".format(author, kind))
 
         @self.bot.event
         async def on_command_error(ctx, error):
             if isinstance(error, commands.errors.CheckFailure):
                 await ctx.send('You do not have the correct role for this command.')
+
+        @self.bot.event
+        async def on_message(message):
+            if not message.author.bot and not message.content.startswith("hp!"):
+                await self.spawn_magical_beast(message.guild, message.channel)
+            await self.bot.process_commands(message)
 
     def update_data_player(self, table: str, player_id: str, fields_and_values: list):
         self.connect_db()
@@ -150,8 +174,8 @@ class PotterCord:
 
     def get_player_data(self, player):
         self.connect_db()
-        return db_get_data_player(self.db, db_player_table, db_player_table_player_id_field_name, str(player.id)
-                                  , ["*"])
+        return db_get_data_by_id(self.db, db_player_table, db_player_table_player_id_field_name, str(player.id)
+                                 , ["*"])
 
     def add_money_to_player(self, player, amount: int):
         player_data = self.get_player_data(player)
@@ -159,11 +183,67 @@ class PotterCord:
 
     def get_player_buildings(self, player):
         self.connect_db()
-        return db_get_data_player(self.db, db_buildings_table, db_buildings_table_player_id_field_name, str(player.id)
-                                  , ["*"])
+        return db_get_data_by_id(self.db, db_buildings_table, db_buildings_table_player_id_field_name, str(player.id)
+                                 , ["*"])
 
-    def build_habitat(self, player, kind):
-        pass
+    def get_habitat_building_price(self, player, kind: str):
+        player_habitats = self.get_habitats_of_player(player)
+        if player_habitats.__len__() == 0:
+            return 0
+        return 100
+
+    def get_buildings_of_player(self, player):
+        self.connect_db()
+        player_buildings = db_get_data_by_id(self.db, db_buildings_table, db_buildings_table_player_id_field_name
+                                             , player.id, ["*"])
+        if player_buildings is None:
+            player_buildings = []
+        return player_buildings
+
+    def get_habitats_of_player(self, player):
+        player_buildings = self.get_buildings_of_player(player)
+        player_habitats = []
+        for item in player_buildings:
+            if item["kind"] == "habitat":
+                player_habitats.append(item)
+        return player_habitats
+
+    async def spawn_magical_beast(self, guild, current_channel):
+        guild_data = self.get_guild_data(guild)
+        if guild_data is not None and guild_data["magical_beasts_spawn_channel_id"] is not None:
+            current_channel = self.bot.fetch_channel(guild_data["magical_beasts_spawn_channel_id"])
+        # elif guild_data is None:
+        #     self.connect_db()
+        #     db_add_data(self.db, db_guilds_data_table, ["guild_id", "magical_beasts_spawn_channel_id"], ["%s", "%s"],
+        #                 (guild.id, current_channel.id))
+        # else:
+        #     self.connect_db()
+        #     db_update_data_player(self.db, db_guilds_data_table, )
+        magical_beast = get_random_magical_beast()
+        await current_channel.send("A magical beast has just spawned!\n"
+                                   "Type hp!catch [name of the magical beast] to catch it!\n"
+                                   + magical_beast.picture_uri)
+        # TODO add listener to catch it.
+
+    def get_guild_data(self, guild):
+        self.connect_db()
+        return db_get_data_by_id(self.db, db_guilds_data_table, db_guilds_data_table_guild_id_field_name
+                                 , guild.id, ["*"])
+
+    def change_money(self, player, amount):
+        player_data = self.get_player_data(player)
+        money = player_data["money"] + amount
+        if money < 0:
+            return False
+        self.connect_db()
+        db_update_data_player(self.db, db_player_table, player.id, [("money", money)])
+        return True
+
+    def add_habitat_to_player(self, player, habitat_kind):
+        player_buildings_amount = self.get_buildings_of_player(player).__len__()
+        self.connect_db()
+        db_add_data(self.db, db_buildings_table, ["building_id", "kind", "owner", "sub_kind"], ["%s", "%s", "%s", "%s"]
+                    , (player_buildings_amount, "habitat", player.id, habitat_kind))
 
 
 if __name__ == '__main__':

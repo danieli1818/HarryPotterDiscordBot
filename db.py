@@ -30,7 +30,7 @@ def is_valid(item):
     elif type(item) is str:
         return not ('`' in item or '\'' in item or '"' in item)
     else:
-        return False
+        return True
 
 
 def is_valid_list_of_tuples(lst):
@@ -109,15 +109,15 @@ def db_update_data_player(db, table: str, player_id: str, fields_and_values: lis
         db.close()
 
 
-def db_get_data_player(db, table: str, player_id_field_name: str, player_id: str, fields: list):
-    if not (is_valid(table) and is_valid(player_id_field_name) and is_valid(player_id) and is_valid(fields)):
+def db_get_data_by_id(db, table: str, id_field_name: str, id_value: str, fields: list):
+    if not (is_valid(table) and is_valid(id_field_name) and is_valid(id_value) and is_valid(fields)):
         raise SQLInjectionException
     try:
         with db.cursor() as cursor:
             # Create a new record
             # update_strs = [str(t[0]) + " = " + str(t[1]) for t in fields_and_values]
             sql = "SELECT " + ", ".join(fields) + " FROM " + table + \
-                  " WHERE " + player_id_field_name + "=" + str(player_id)
+                  " WHERE " + id_field_name + "=" + str(id_value)
             cursor.execute(sql)
             result = cursor.fetchone()
             return result
