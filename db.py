@@ -81,14 +81,15 @@ def db_add_data(db, table: str, fields: list, fields_types: list, values: tuple)
         db.close()
 
 
-def db_update_data_player(db, table: str, player_id: str, fields_and_values: list):
-    if not (is_valid(table) and is_valid(player_id) and is_valid_list_of_tuples(fields_and_values)):
+def db_update_data_by_id(db, table: str, id_field_name: str, id_value: str, fields_and_values: list):
+    if not (is_valid(table) and is_valid(id_field_name) and is_valid(id_value) and
+            is_valid_list_of_tuples(fields_and_values)):
         raise SQLInjectionException
     try:
         with db.cursor() as cursor:
             # Create a new record
             update_strs = [str(t[0]) + " = " + str(t[1]) for t in fields_and_values]
-            sql = "UPDATE " + table + " SET " + ", ".join(update_strs) + " WHERE id=" + str(player_id)
+            sql = "UPDATE " + table + " SET " + ", ".join(update_strs) + " WHERE " + id_field_name + "=" + str(id_value)
             cursor.execute(sql)
 
         # connection is not autocommit by default. So you must commit to save

@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from discord.ext import commands
 
-from db import connect_database, db_add_data, db_update_data_player, db_get_data_by_id
+from db import connect_database, db_add_data, db_update_data_by_id, db_get_data_by_id
 from magical_beasts_manager import get_random_magical_beast
 
 load_dotenv()
@@ -129,6 +129,19 @@ class PotterCord:
             self.add_habitat_to_player(author, kind)
             await ctx.send("{0.mention} habitat {1} has been successfully built!".format(author, kind))
 
+        @self.bot.command(name='tame',
+                          brief='The command to tame a spawned magical beast!',
+                          help='Type hp!tame [magical beast name] tp tame the spawned magical beast!')
+        @commands.has_role("Wizard")
+        async def tame(ctx, name: str):
+            guild = ctx.guild
+            author = ctx.author
+            guild_data = self.get_guild_data(guild)
+            if guild_data is None or guild_data["current_magical_beast"] is None:
+                return
+            if guild_data["current_magical_beast"] == name:
+                pass
+
         @self.bot.event
         async def on_command_error(ctx, error):
             if isinstance(error, commands.errors.CheckFailure):
@@ -140,15 +153,15 @@ class PotterCord:
                 await self.spawn_magical_beast(message.guild, message.channel)
             await self.bot.process_commands(message)
 
-    def update_data_player(self, table: str, player_id: str, fields_and_values: list):
+    def update_data_by_id(self, table: str, id_field_name: str, id_value: str, fields_and_values: list):
         self.connect_db()
-        db_update_data_player(self.db, table, player_id, fields_and_values)
+        db_update_data_by_id(self.db, table, id_field_name, id_value, fields_and_values)
 
     def add_xp_to_player(self, xp, player):
         if xp <= 0:
             return
         else:
-            self.update_data_player(db_player_table, player.id, [("xp_points", xp)])
+            self.update_data_by_id(db_player_table, db_player_table_player_id_field_name, player.id, [("xp_points", xp)])
 
     def add_player(self, player):
         self.connect_db()
@@ -177,9 +190,9 @@ class PotterCord:
         return db_get_data_by_id(self.db, db_player_table, db_player_table_player_id_field_name, str(player.id)
                                  , ["*"])
 
-    def add_money_to_player(self, player, amount: int):
-        player_data = self.get_player_data(player)
-        self.update_data_player(db_player_table, player.id, [("money", player_data["money"] + amount)])
+    # def add_money_to_player(self, player, amount: int):
+    #     player_data = self.get_player_data(player)
+    #     self.update_data_by_id(db_player_table, player.id, [("money", player_data["money"] + amount)])
 
     def get_player_buildings(self, player):
         self.connect_db()
@@ -220,8 +233,9 @@ class PotterCord:
         #     self.connect_db()
         #     db_update_data_player(self.db, db_guilds_data_table, )
         magical_beast = get_random_magical_beast()
+        self.set_server_current_magical_beast(guild, magical_beast)
         await current_channel.send("A magical beast has just spawned!\n"
-                                   "Type hp!catch [name of the magical beast] to catch it!\n"
+                                   "Type hp!tame [name of the magical beast] to catch it!\n"
                                    + magical_beast.picture_uri)
         # TODO add listener to catch it.
 
@@ -235,8 +249,7 @@ class PotterCord:
         money = player_data["money"] + amount
         if money < 0:
             return False
-        self.connect_db()
-        db_update_data_player(self.db, db_player_table, player.id, [("money", money)])
+        self.update_data_by_id(db_player_table, db_player_table_player_id_field_name, player.id, [("money", money)])
         return True
 
     def add_habitat_to_player(self, player, habitat_kind):
@@ -244,6 +257,18 @@ class PotterCord:
         self.connect_db()
         db_add_data(self.db, db_buildings_table, ["building_id", "kind", "owner", "sub_kind"], ["%s", "%s", "%s", "%s"]
                     , (player_buildings_amount, "habitat", player.id, habitat_kind))
+
+    def set_server_current_magical_beast(self, guild, magical_beast):
+        self.update_data_by_id(db_guilds_data_table, db_guilds_data_table_guild_id_field_name, guild.id
+                               , [("current_magical_beast", magical_beast.kind)])
+
+    def get_magical_beasts_of_player(self, player):
+        self.connect_db()
+        return db_get_data_by_id(self.db, db_magical_beasts_table, db_magical_beasts_table_player_id_field_name,
+                                 player.id, ["*"])
+
+    def add_magical_beast_to_player(self, player, magical_beast):
+        pass
 
 
 if __name__ == '__main__':
