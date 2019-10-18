@@ -12,7 +12,8 @@ from dotenv import load_dotenv
 from discord.ext import commands
 
 from db import connect_database, db_add_data, db_update_data_by_id, db_get_data_by_id
-from magical_beasts_manager import get_random_magical_beast, get_magical_beast_by_kind
+# from magical_beasts_manager import get_random_magical_beast, get_magical_beast_by_kind
+import magical_beasts_manager as mbm
 
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
@@ -93,6 +94,11 @@ class PotterCord:
             self.add_xp_to_player(xp, author)
             await ctx.send("{0.mention} xp points were set to {1}".format(author, xp))
 
+        @self.bot.command(name='get_creation_date')
+        async def get_creation_date(ctx):
+            guild = ctx.guild
+            await ctx.send("guild was created at {0.created_at} UTC".format(guild))
+
         @self.bot.command(name='stats',
                           brief='The command to get your stats info',
                           help='The command to get your stats info')
@@ -141,7 +147,7 @@ class PotterCord:
                 return
             if guild_data["current_magical_beast"] == name:
                 self.set_server_current_magical_beast(guild, None)
-                self.add_magical_beast_to_player(author, get_magical_beast_by_kind(name))
+                self.add_magical_beast_to_player(author, mbm.get_magical_beast_by_kind(name))
                 message = "a "
                 if name[0] in "aeuoi":
                     message = "an "
@@ -179,6 +185,33 @@ class PotterCord:
             await ctx.send("{0.mention} channel {1.mention}".format(author, current_channel) +
                            " has been set successfully to be magical beast spawn channel")
 
+        @self.bot.command(name='info',
+                          brief='Get information about a magical beast',
+                          help='Get information about a magical beast\n'
+                               'Correct use: hp!info [magical beast kind or id]')
+        async def info(ctx, magical_beast_id_or_kind):
+            author = ctx.author
+            try:
+                magical_beast_id = int(magical_beast_id_or_kind)
+                magical_beast_kind = self.get_data_from_db(db_magical_beasts_table
+                                                           , [(db_magical_beasts_table_player_id_field_name, author.id),
+                                                              ("id", magical_beast_id)], ["type"])
+                if magical_beast_kind is None:
+                    await ctx.send(
+                        "{0.mention} you don't have magical beast with the id: {1}".format(author, magical_beast_id))
+                    return
+                magical_beast_kind = magical_beast_kind[0]["type"]
+            except Exception as e:
+                magical_beast_kind = magical_beast_id_or_kind
+            magical_beast = mbm.get_magical_beast_by_kind(magical_beast_kind)
+            if magical_beast is None:
+                await ctx.send("{0.mention} there is no magical beast kind: {1}".format(author, magical_beast_kind))
+                return
+            data = magical_beast.get_data()
+            with open(mbm.get_magical_beast_uri(magical_beast), 'rb') as image:
+                await ctx.send(content="{0.mention} {1}:\n".format(author, magical_beast_kind) +
+                               "description: " + data["description"], file=discord.File(image, data["uri"]))
+
         @self.bot.event
         async def on_command_error(ctx, error):
             if isinstance(error, commands.errors.CheckFailure):
@@ -191,7 +224,7 @@ class PotterCord:
 
         @self.bot.event
         async def on_message(message):
-            if not message.author.bot and not message.content.startswith("hp!"):
+            if not message.author.bot and not message.content.startswith("hp!") and rnd.randint(1, 10) == 1:
                 await self.spawn_magical_beast(message.guild, message.channel)
             await self.bot.process_commands(message)
 
@@ -241,7 +274,9 @@ class PotterCord:
         self.connect_db()
         player_data = db_get_data_by_id(self.db, db_player_table, [(db_player_table_player_id_field_name, str(player.id))]
                                         , ["*"])
-        if player_data is not None:
+        if player_data is ():
+            player_data = None
+        else:
             player_data = player_data[0]
         return player_data
 
@@ -290,11 +325,15 @@ class PotterCord:
         # else:
         #     self.connect_db()
         #     db_update_data_player(self.db, db_guilds_data_table, )
-        magical_beast = get_random_magical_beast()
+        magical_beast = mbm.get_random_magical_beast()
+        data = magical_beast.get_data()
         self.set_server_current_magical_beast(guild, magical_beast)
-        await current_channel.send("A magical beast has just spawned!\n"
-                                   "Type hp!tame [name of the magical beast] to catch it!\n"
-                                   "{0.picture_uri}".format(magical_beast))
+        with open(mbm.get_magical_beast_uri(magical_beast), 'rb') as image:
+            await current_channel.send(content="A magical beast has just spawned!\n"
+                                       "Type hp!tame [name of the magical beast] to catch it!\n",
+                                       file=discord.File(image, data["uri"]))
+            # await current_channel.send(file=discord.File(image, data["uri"]))
+
 
     def get_guild_data(self, guild):
         self.connect_db()
@@ -323,8 +362,9 @@ class PotterCord:
             self.update_data_by_id(db_guilds_data_table, db_guilds_data_table_guild_id_field_name, guild.id
                                    , [("current_magical_beast", "NULL")])
             return
+        data = magical_beast.get_data()
         self.update_data_by_id(db_guilds_data_table, db_guilds_data_table_guild_id_field_name, guild.id
-                               , [("current_magical_beast", "\"" + magical_beast.kind + "\"")])
+                               , [("current_magical_beast", "\"" + data["kind"] + "\"")])
 
     def get_magical_beasts_of_player(self, player):
         self.connect_db()
@@ -341,10 +381,11 @@ class PotterCord:
         if player_data is None:
             return
         self.connect_db()
+        data = magical_beast.get_data()
         db_add_data(self.db, db_magical_beasts_table,
                     ["id", "name", "type", "gender", db_magical_beasts_table_player_id_field_name, "habitat_id"]
-                    , ["%s", "%s", "%s", "%s", "%s", "%s"], (player_data["next_magical_beast_id"], magical_beast.kind
-                                                             , magical_beast.kind, bool(rnd.randint(0, 1))
+                    , ["%s", "%s", "%s", "%s", "%s", "%s"], (player_data["next_magical_beast_id"], data["kind"]
+                                                             , data["kind"], bool(rnd.randint(0, 1))
                                                              , player.id, ministry_of_magic_habitat_id))
         self.update_data_by_id(db_player_table, db_player_table_player_id_field_name, player.id
                                , [("tamed_magical_beasts_number", player_data["tamed_magical_beasts_number"] + 1)])
@@ -361,6 +402,10 @@ class PotterCord:
         if self.get_guild_data(guild) is None:
             return False
         return True
+
+    def get_data_from_db(self, table: str, where_fields_name_and_values: list, fields: list):
+        self.connect_db()
+        return db_get_data_by_id(self.db, table, where_fields_name_and_values, fields)
 
 
 if __name__ == '__main__':
